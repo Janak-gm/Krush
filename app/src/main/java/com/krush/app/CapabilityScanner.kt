@@ -85,6 +85,15 @@ object CapabilityScanner {
             line("RAW_SENSOR (DNG): ${map.getOutputSizes(android.graphics.ImageFormat.RAW_SENSOR)?.joinToString(", ") { "${it.width}x${it.height}" } ?: "NONE"}")
             line("RAW10: ${map.getOutputSizes(android.graphics.ImageFormat.RAW10)?.joinToString(", ") { "${it.width}x${it.height}" } ?: "NONE"}")
             line("PRIVATE: ${map.getOutputSizes(android.graphics.ImageFormat.PRIVATE)?.joinToString(", ") { "${it.width}x${it.height}" } ?: "NONE"}")
+            line("YV12: ${map.getOutputSizes(android.graphics.ImageFormat.YV12)?.joinToString(", ") { "${it.width}x${it.height}" } ?: "NONE"}")
+
+            // High-resolution output sizes (API 23+)
+            try {
+                val highRes = map.getHighResolutionOutputSizes(android.graphics.ImageFormat.JPEG)
+                line("High-resolution JPEG sizes: ${highRes?.joinToString(", ") { "${it.width}x${it.height}" } ?: "NONE"}")
+            } catch (e: Exception) {
+                line("High-resolution sizes: N/A (${e.message})")
+            }
 
             // High-speed video
             val highSpeed = map.highSpeedVideoSizes
@@ -93,6 +102,45 @@ object CapabilityScanner {
             // Input formats (reprocess)
             line("Input formats: ${map.inputFormats?.joinToString(", ") { formatName(it) } ?: "NONE"}")
             line("Output formats: ${map.outputFormats?.joinToString(", ") { formatName(it) } ?: "NONE"}")
+
+            // Stream combination support
+            line()
+            line("--- STREAM COMBINATIONS ---")
+            val maxYuv = map.getOutputSizes(android.graphics.ImageFormat.YUV_420_888)
+                ?.maxByOrNull { it.width.toLong() * it.height.toLong() }
+            val maxJpeg = map.getOutputSizes(android.graphics.ImageFormat.JPEG)
+                ?.maxByOrNull { it.width.toLong() * it.height.toLong() }
+            val preview = map.getOutputSizes(android.graphics.ImageFormat.PRIVATE)
+                ?.firstOrNull { it.width <= 1920 && it.height <= 1080 }
+
+            line("  YUV_420_888 output supported: ${try { map.isOutputSupportedFor(android.graphics.ImageFormat.YUV_420_888) } catch (e: Exception) { false }}")
+            line("  JPEG output supported: ${try { map.isOutputSupportedFor(android.graphics.ImageFormat.JPEG) } catch (e: Exception) { false }}")
+            line("  PRIVATE output supported: ${try { map.isOutputSupportedFor(android.graphics.ImageFormat.PRIVATE) } catch (e: Exception) { false }}")
+
+            if (maxYuv != null) {
+                var reader: android.media.ImageReader? = null
+                try {
+                    reader = android.media.ImageReader.newInstance(maxYuv.width, maxYuv.height, android.graphics.ImageFormat.YUV_420_888, 1)
+                    val ok = map.isOutputSupportedFor(reader.surface)
+                    line("  maxYUV surface (${maxYuv.width}x${maxYuv.height}) supported: $ok")
+                } catch (e: Exception) {
+                    line("  maxYUV surface check failed: ${e.message}")
+                } finally {
+                    reader?.close()
+                }
+            }
+            if (maxJpeg != null) {
+                var reader: android.media.ImageReader? = null
+                try {
+                    reader = android.media.ImageReader.newInstance(maxJpeg.width, maxJpeg.height, android.graphics.ImageFormat.JPEG, 1)
+                    val ok = map.isOutputSupportedFor(reader.surface)
+                    line("  maxJPEG surface (${maxJpeg.width}x${maxJpeg.height}) supported: $ok")
+                } catch (e: Exception) {
+                    line("  maxJPEG surface check failed: ${e.message}")
+                } finally {
+                    reader?.close()
+                }
+            }
         } else {
             line("Stream configuration map: NULL")
         }
@@ -221,6 +269,7 @@ object CapabilityScanner {
         android.graphics.ImageFormat.DEPTH16 -> "DEPTH16"
         android.graphics.ImageFormat.DEPTH_JPEG -> "DEPTH_JPEG"
         android.graphics.ImageFormat.HEIC -> "HEIC"
+        android.graphics.ImageFormat.YV12 -> "YV12"
         else -> "UNKNOWN($f)"
     }
 

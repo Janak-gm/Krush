@@ -64,7 +64,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun runScan() {
-        output.text = "Scanning camera capabilities..."
+        output.text = "Scanning camera capabilities + running camera lab..."
         Thread {
             val sb = StringBuilder()
             try {
@@ -72,9 +72,22 @@ class MainActivity : AppCompatActivity() {
                 val manager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
 
                 sb.append(CapabilityScanner.deviceInfo())
+                sb.append(GpuInfo.query())
                 sb.append(CapabilityScanner.memoryInfo(am))
                 sb.append(CapabilityScanner.scan(manager))
                 sb.append(CameraXExtensionScanner.scan(this))
+
+                // Camera Lab: capture one max-YUV frame + max-JPEG.
+                val outDir = getExternalFilesDir(null) ?: filesDir
+                val labDir = File(outDir, "lab")
+                if (!labDir.exists()) labDir.mkdirs()
+                val labResult = CameraLab.run(this, labDir)
+                sb.append("===== CAMERA LAB =====\n")
+                sb.append(labResult.log)
+                if (labResult.yuvFile != null) sb.append("YUV saved: ${labResult.yuvFile.name}\n")
+                if (labResult.jpegFile != null) sb.append("JPEG saved: ${labResult.jpegFile.name}\n")
+                if (labResult.yuvThumbFile != null) sb.append("YUV thumb: ${labResult.yuvThumbFile.name}\n")
+                if (labResult.jpegThumbFile != null) sb.append("JPEG thumb: ${labResult.jpegThumbFile.name}\n")
             } catch (e: Exception) {
                 sb.append("FATAL: ").append(e.message).append('\n')
             }
