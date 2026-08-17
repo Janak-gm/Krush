@@ -10,6 +10,12 @@ build/
 out/
 coverage/
 
+# Gradle
+.gradle/
+local.properties
+*.apk
+*.aab
+
 # Environment & secrets
 .env
 .env.*
