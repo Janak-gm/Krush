@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.SeekBar
@@ -19,11 +20,13 @@ class CameraActivity : AppCompatActivity() {
 
     companion object {
         private const val REQ_CAMERA = 200
-        private const val REQ_MIC = 201
 
         private enum class Mode(val label: String) {
             PHOTO("PHOTO"),
-            VIDEO("VIDEO")
+            VIDEO("VIDEO"),
+            PORTRAIT("PORTRAIT"),
+            NIGHT("NIGHT"),
+            PRO("PRO")
         }
     }
 
@@ -37,10 +40,21 @@ class CameraActivity : AppCompatActivity() {
     private lateinit var evLabel: TextView
     private lateinit var shutterCore: View
     private lateinit var btnFlash: TextView
+    private lateinit var btnHdr: TextView
+    private lateinit var recTimer: TextView
 
     private var mode = Mode.PHOTO
     private var proPanelVisible = false
+    private var hdrOn = false
     private var aspectChips = mutableListOf<TextView>()
+    private var modeChips = mutableListOf<TextView>()
+
+    private val timerRunnable = object : Runnable {
+        override fun run() {
+            updateTimer()
+            recTimer.postDelayed(this, 30)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -69,6 +83,13 @@ class CameraActivity : AppCompatActivity() {
     private fun initController() {
         val texture = findViewById<AutoFitTextureView>(R.id.camera_preview)
         controller = CameraController(this, texture)
+        val debug = findViewById<TextView>(R.id.debug_overlay)
+        texture.onDebugInfo = { info ->
+            runOnUiThread {
+                debug.text = info
+                debug.visibility = View.VISIBLE
+            }
+        }
     }
 
     private fun bindViews() {
@@ -81,6 +102,8 @@ class CameraActivity : AppCompatActivity() {
         evLabel = findViewById(R.id.ev_label)
         shutterCore = findViewById(R.id.shutter_core)
         btnFlash = findViewById(R.id.btn_flash)
+        btnHdr = findViewById(R.id.btn_hdr)
+        recTimer = findViewById(R.id.rec_timer)
     }
 
     private fun startCamera() {
@@ -137,6 +160,7 @@ class CameraActivity : AppCompatActivity() {
                 updateResolutionText()
             }
             modeRow.addView(chip)
+            modeChips.add(chip)
         }
         updateModeChips()
     }
@@ -147,12 +171,12 @@ class CameraActivity : AppCompatActivity() {
             textSize = 13f
             setTextColor(Color.WHITE)
             setBackgroundResource(R.drawable.chip_bg)
-            setPadding(28, 14, 28, 14)
+            setPadding(24, 12, 24, 12)
             val lp = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
-            lp.marginEnd = 12
+            lp.marginEnd = 10
             layoutParams = lp
         }
     }
@@ -172,7 +196,6 @@ class CameraActivity : AppCompatActivity() {
     }
 
     private fun updateModeChips() {
-        val modeChips = (0 until modeRow.childCount).map { modeRow.getChildAt(it) as TextView }
         for ((i, chip) in modeChips.withIndex()) {
             val active = i == Mode.values().indexOf(mode)
             if (active) {
@@ -251,7 +274,14 @@ class CameraActivity : AppCompatActivity() {
             controller.applySettings()
         }
 
-        findViewById<View>(R.id.btn_pro).setOnClickListener {
+        btnHdr.setOnClickListener {
+            hdrOn = !hdrOn
+            btnHdr.alpha = if (hdrOn) 1.0f else 0.4f
+            // HDR is a future multi-frame capture; placeholder toggle for now.
+            Toast.makeText(this, if (hdrOn) "HDR ON" else "HDR OFF", Toast.LENGTH_SHORT).show()
+        }
+
+        findViewById<View>(R.id.btn_settings).setOnClickListener {
             proPanelVisible = !proPanelVisible
             proPanel.visibility = if (proPanelVisible) View.VISIBLE else View.GONE
         }
@@ -268,27 +298,60 @@ class CameraActivity : AppCompatActivity() {
     }
 
     private fun onShutterClick() {
-        if (mode == Mode.PHOTO) {
+        if (mode == Mode.PHOTO || mode == Mode.PORTRAIT || mode == Mode.NIGHT || mode == Mode.PRO) {
             controller.capture { ok ->
                 runOnUiThread {
                     Toast.makeText(this, if (ok) "Saved" else "Capture failed", Toast.LENGTH_SHORT).show()
                 }
             }
         } else {
-            if (!controller.isRecording()) {
-                controller.startRecording { ok ->
-                    runOnUiThread {
-                        if (!ok) Toast.makeText(this, "Record failed", Toast.LENGTH_SHORT).show()
+            when {
+                !controller.isRecording() -> {
+                    controller.startRecording { ok ->
+                        runOnUiThread {
+                            if (!ok) Toast.makeText(this, "Record failed", Toast.LENGTH_SHORT).show()
+                            else startTimer()
+                        }
                     }
                 }
-            } else {
-                controller.stopRecording { path ->
-                    runOnUiThread {
-                        Toast.makeText(this, if (path != null) "Video saved" else "Stop failed", Toast.LENGTH_SHORT).show()
+                controller.isPaused() -> {
+                    controller.resumeRecording { _ ->
+                        runOnUiThread { startTimer() }
+                    }
+                }
+                else -> {
+                    // Recording and not paused -> stop.
+                    controller.stopRecording { path ->
+                        runOnUiThread {
+                            stopTimer()
+                            Toast.makeText(this, if (path != null) "Video saved" else "Stop failed", Toast.LENGTH_SHORT).show()
+                        }
                     }
                 }
             }
         }
+    }
+
+    private fun startTimer() {
+        recTimer.visibility = View.VISIBLE
+        recTimer.removeCallbacks(timerRunnable)
+        recTimer.post(timerRunnable)
+    }
+
+    private fun stopTimer() {
+        recTimer.removeCallbacks(timerRunnable)
+        recTimer.visibility = View.GONE
+    }
+
+    private fun updateTimer() {
+        val ms = controller.recordedDurationMs()
+        val totalSec = ms / 1000
+        val min = totalSec / 60
+        val sec = totalSec % 60
+        val cs = (ms % 1000) / 10
+        val paused = controller.isPaused()
+        val prefix = if (paused) "PAUSED" else "REC ●"
+        recTimer.text = String.format("%s %02d:%02d.%02d", prefix, min, sec, cs)
     }
 
     private fun updateLabels() {
@@ -302,8 +365,9 @@ class CameraActivity : AppCompatActivity() {
 
     private fun updateResolutionText() {
         if (!::controller.isInitialized) return
-        val res = if (mode == Mode.PHOTO) controller.currentPhotoSize() else controller.currentVideoSize()
-        resolutionText.text = "$res · ${controller.currentAspect.label} · ${mode.label}"
+        val res = controller.currentPhotoSize()
+        val aspectLabel = controller.currentPhotoAspectLabel()
+        resolutionText.text = "$res · $aspectLabel"
     }
 
     override fun onRequestPermissionsResult(
@@ -324,6 +388,7 @@ class CameraActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        recTimer.removeCallbacks(timerRunnable)
         if (::controller.isInitialized) controller.close()
     }
 }

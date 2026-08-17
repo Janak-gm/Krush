@@ -4,49 +4,112 @@
     android:layout_height="match_parent"
     android:background="@android:color/black">
 
+    <!-- Immersive full-screen preview -->
     <com.krush.app.AutoFitTextureView
         android:id="@+id/camera_preview"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:layout_gravity="center" />
+        android:layout_height="match_parent" />
 
-    <!-- Top status bar -->
-    <LinearLayout
-        android:id="@+id/top_bar"
-        android:layout_width="match_parent"
+    <!-- Top-left: resolution + aspect label -->
+    <TextView
+        android:id="@+id/resolution_text"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="top"
-        android:orientation="vertical"
+        android:layout_gravity="top|start"
+        android:layout_margin="16dp"
+        android:background="#55000000"
+        android:paddingStart="10dp"
+        android:paddingEnd="10dp"
+        android:paddingTop="5dp"
+        android:paddingBottom="5dp"
+        android:text="4064 × 3048 · 4:3"
+        android:textColor="#FFFFFF"
+        android:textSize="12sp" />
+
+    <!-- Debug overlay (orientation info) -->
+    <TextView
+        android:id="@+id/debug_overlay"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="60dp"
+        android:background="#99000000"
+        android:padding="6dp"
+        android:text=""
+        android:textColor="#00FF88"
+        android:textSize="10sp"
+        android:visibility="gone" />
+
+    <!-- Top-right: flash / HDR / settings -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:orientation="horizontal"
         android:padding="12dp">
 
         <TextView
-            android:id="@+id/resolution_text"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center_horizontal"
-            android:background="#66000000"
-            android:paddingStart="12dp"
-            android:paddingEnd="12dp"
-            android:paddingTop="4dp"
-            android:paddingBottom="4dp"
-            android:text="4064x3048 · 4:3 · PHOTO"
+            android:id="@+id/btn_flash"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:gravity="center"
+            android:text="⚡"
             android:textColor="#FFFFFF"
-            android:textSize="12sp" />
+            android:textSize="20sp" />
 
-        <HorizontalScrollView
+        <TextView
+            android:id="@+id/btn_hdr"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:gravity="center"
+            android:text="HDR"
+            android:textColor="#FFFFFF"
+            android:textSize="11sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/btn_settings"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:gravity="center"
+            android:text="⚙"
+            android:textColor="#FFFFFF"
+            android:textSize="22sp" />
+    </LinearLayout>
+
+    <!-- Recording timer (hidden until recording) -->
+    <TextView
+        android:id="@+id/rec_timer"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|center_horizontal"
+        android:layout_marginTop="16dp"
+        android:background="#99000000"
+        android:paddingStart="14dp"
+        android:paddingEnd="14dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp"
+        android:text="REC ● 00:00.00"
+        android:textColor="#FF5252"
+        android:textSize="15sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
+    <!-- Aspect ratio selector (bottom center, above mode row) -->
+    <HorizontalScrollView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="150dp"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:id="@+id/aspect_row"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_gravity="center_horizontal"
-            android:layout_marginTop="8dp"
-            android:scrollbars="none">
-
-            <LinearLayout
-                android:id="@+id/aspect_row"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal" />
-        </HorizontalScrollView>
-    </LinearLayout>
+            android:orientation="horizontal" />
+    </HorizontalScrollView>
 
     <!-- Bottom control bar -->
     <LinearLayout
@@ -72,7 +135,7 @@
             android:id="@+id/control_row"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
+            android:layout_marginTop="14dp"
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
@@ -97,15 +160,15 @@
 
                 <View
                     android:id="@+id/shutter_ring"
-                    android:layout_width="72dp"
-                    android:layout_height="72dp"
+                    android:layout_width="76dp"
+                    android:layout_height="76dp"
                     android:layout_gravity="center"
                     android:background="@drawable/shutter_ring" />
 
                 <View
                     android:id="@+id/shutter_core"
-                    android:layout_width="56dp"
-                    android:layout_height="56dp"
+                    android:layout_width="58dp"
+                    android:layout_height="58dp"
                     android:layout_gravity="center"
                     android:background="@drawable/shutter_core" />
             </FrameLayout>
@@ -133,7 +196,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
-        android:background="#AA000000"
+        android:background="#CC000000"
         android:orientation="vertical"
         android:padding="16dp"
         android:visibility="gone">
@@ -176,32 +239,5 @@
             android:id="@+id/ev_seek"
             android:layout_width="match_parent"
             android:layout_height="wrap_content" />
-    </LinearLayout>
-
-    <!-- Flash + Pro toggles -->
-    <LinearLayout
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="top|end"
-        android:orientation="horizontal"
-        android:padding="12dp">
-
-        <TextView
-            android:id="@+id/btn_flash"
-            android:layout_width="44dp"
-            android:layout_height="44dp"
-            android:gravity="center"
-            android:text="⚡"
-            android:textColor="#FFFFFF"
-            android:textSize="20sp" />
-
-        <TextView
-            android:id="@+id/btn_pro"
-            android:layout_width="44dp"
-            android:layout_height="44dp"
-            android:gravity="center"
-            android:textColor="#FFFFFF"
-            android:textSize="12sp"
-            android:textStyle="bold" />
     </LinearLayout>
 </FrameLayout>

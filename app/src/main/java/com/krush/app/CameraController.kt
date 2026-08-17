@@ -13,9 +13,9 @@ import android.media.MediaRecorder
 import android.os.Environment
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.Log
-import android.util.Range
 import android.util.Size
 import android.util.SparseIntArray
 import android.view.Surface
@@ -39,13 +39,33 @@ class CameraController(
             append(Surface.ROTATION_270, 180)
         }
 
+        /**
+         * Output aspect ratios. Note: these describe the CAPTURE BUFFER ratio
+         * (always landscape, since the sensor is landscape). 9:16 is NOT a
+         * separate sensor format — it is 16:9 presented in portrait. We keep a
+         * PORTRAIT presentation flag separately in the UI.
+         */
         enum class Aspect(val w: Int, val h: Int, val label: String) {
             FOUR_THREE(4, 3, "4:3"),
             SIXTEEN_NINE(16, 9, "16:9"),
-            NINE_SIXTEEN(9, 16, "9:16"),
             ONE_ONE(1, 1, "1:1");
 
             override fun toString(): String = label
+
+            val ratio: Double get() = w.toDouble() / h.toDouble()
+        }
+
+        /** Returns the closest standard aspect ratio label for a size, with tolerance. */
+        fun classifyAspect(width: Int, height: Int): String {
+            val ratio = width.toDouble() / height.toDouble()
+            val candidates = listOf(
+                "4:3" to (4.0 / 3.0),
+                "16:9" to (16.0 / 9.0),
+                "1:1" to 1.0,
+                "3:2" to (3.0 / 2.0)
+            )
+            val (label, _) = candidates.minByOrNull { Math.abs(it.second - ratio) } ?: return "?"
+            return label
         }
     }
 
@@ -78,8 +98,14 @@ class CameraController(
     private var capturing = false
     private var mediaRecorder: MediaRecorder? = null
     private var recording = false
+    private var paused = false
     private var recordingFile: File? = null
     private var sensorOrientation = 90
+    private var mirrorFront = false
+
+    // Monotonic recording timer state.
+    private var accumulatedMs = 0L
+    private var runningBaseMs = 0L
 
     var onRecordingStateChanged: ((Boolean) -> Unit)? = null
 
@@ -149,6 +175,19 @@ class CameraController(
 
     fun isRecording(): Boolean = recording
 
+    /** Returns true if currently paused mid-recording. */
+    fun isPaused(): Boolean = paused
+
+    /**
+     * Accumulated recorded duration in ms (excluding paused time). Uses a
+     * monotonic base so the timer never drifts.
+     */
+    fun recordedDurationMs(): Long {
+        if (!recording) return 0L
+        val running = if (paused) 0L else (SystemClock.elapsedRealtime() - runningBaseMs)
+        return accumulatedMs + running
+    }
+
     fun startRecording(onResult: (Boolean) -> Unit) {
         if (recording) {
             onResult(false)
@@ -181,6 +220,9 @@ class CameraController(
                             }.build()
                             recorder.start()
                             recording = true
+                            paused = false
+                            accumulatedMs = 0L
+                            runningBaseMs = SystemClock.elapsedRealtime()
                             runOnUiThread { onRecordingStateChanged?.invoke(true) }
                             session.setRepeatingRequest(req, null, handler)
                             onResult(true)
@@ -202,6 +244,49 @@ class CameraController(
         }
     }
 
+    /**
+     * Pauses recording. On API 24+ this uses the real MediaRecorder pause;
+     * the preview keeps running and the timer freezes.
+     */
+    fun pauseRecording(onResult: (Boolean) -> Unit) {
+        if (!recording || paused) {
+            onResult(false)
+            return
+        }
+        handler.post {
+            try {
+                mediaRecorder?.pause()
+                accumulatedMs += SystemClock.elapsedRealtime() - runningBaseMs
+                paused = true
+                runOnUiThread { onRecordingStateChanged?.invoke(true) }
+                onResult(true)
+            } catch (e: Exception) {
+                Log.e(TAG, "pauseRecording failed", e)
+                onResult(false)
+            }
+        }
+    }
+
+    /** Resumes a paused recording, continuing the same output file and timer. */
+    fun resumeRecording(onResult: (Boolean) -> Unit) {
+        if (!recording || !paused) {
+            onResult(false)
+            return
+        }
+        handler.post {
+            try {
+                mediaRecorder?.resume()
+                runningBaseMs = SystemClock.elapsedRealtime()
+                paused = false
+                runOnUiThread { onRecordingStateChanged?.invoke(true) }
+                onResult(true)
+            } catch (e: Exception) {
+                Log.e(TAG, "resumeRecording failed", e)
+                onResult(false)
+            }
+        }
+    }
+
     fun stopRecording(onResult: (String?) -> Unit) {
         if (!recording) {
             onResult(null)
@@ -218,6 +303,8 @@ class CameraController(
             mediaRecorder?.release()
             mediaRecorder = null
             recording = false
+            paused = false
+            accumulatedMs = 0L
             runOnUiThread { onRecordingStateChanged?.invoke(false) }
 
             // Recreate a preview-only session (recording session is now closed with the device).
@@ -253,7 +340,13 @@ class CameraController(
         backgroundThread.quitSafely()
     }
 
-    fun currentPhotoSize(): String = jpegSize?.let { "${it.width}x${it.height}" } ?: "?"
+    fun currentPhotoSize(): String = jpegSize?.let {
+        "${it.width}x${it.height}"
+    } ?: "?"
+
+    fun currentPhotoAspectLabel(): String = jpegSize?.let {
+        classifyAspect(it.width, it.height)
+    } ?: "?"
 
     fun currentVideoSize(): String = videoSize()?.let { "${it.width}x${it.height}" } ?: "1080x1920"
 
@@ -265,13 +358,15 @@ class CameraController(
         try {
             characteristics = cameraManager.getCameraCharacteristics(cameraId)
             sensorOrientation = characteristics?.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
+            mirrorFront = characteristics?.get(CameraCharacteristics.LENS_FACING) ==
+                CameraCharacteristics.LENS_FACING_FRONT
             val map = characteristics?.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
 
             jpegSize = chooseSize(
                 map?.getOutputSizes(ImageFormat.JPEG)?.toList(),
                 currentAspect
             )
-            previewSize = chooseSize(
+            previewSize = choosePreviewSize(
                 map?.getOutputSizes(ImageFormat.PRIVATE)?.toList(),
                 currentAspect
             )
@@ -279,10 +374,9 @@ class CameraController(
             val imgSize = jpegSize ?: Size(4064, 3048)
             imageReader = ImageReader.newInstance(imgSize.width, imgSize.height, ImageFormat.JPEG, 2)
 
-            val isFront = characteristics?.get(CameraCharacteristics.LENS_FACING) ==
-                CameraCharacteristics.LENS_FACING_FRONT
             val pSize = previewSize ?: Size(1920, 1080)
-            textureView.setCameraParams(pSize.width, pSize.height, sensorOrientation, isFront)
+            Log.i(TAG, "openCamera: aspect=$currentAspect jpeg=$imgSize preview=$pSize sensorOrientation=$sensorOrientation front=$mirrorFront")
+            textureView.setCameraParams(pSize.width, pSize.height, sensorOrientation, mirrorFront, mirrorFront)
 
             cameraManager.openCamera(cameraId, object : CameraDevice.StateCallback() {
                 override fun onOpened(camera: CameraDevice) {
@@ -361,7 +455,31 @@ class CameraController(
             if (flashOn && !isVideo) CaptureRequest.FLASH_MODE_SINGLE else CaptureRequest.FLASH_MODE_OFF
         )
 
+        // Set correct JPEG orientation for still captures so photos are upright.
+        if (template == CameraDevice.TEMPLATE_STILL_CAPTURE) {
+            b.set(CaptureRequest.JPEG_ORIENTATION, jpegOrientation())
+        }
+
         return b
+    }
+
+    /** Returns the JPEG rotation (0/90/180/270) that makes photos upright. */
+    private fun jpegOrientation(): Int {
+        val rotation = when (
+            (context.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager)
+                ?.defaultDisplay?.rotation
+        ) {
+            Surface.ROTATION_90 -> 90
+            Surface.ROTATION_180 -> 180
+            Surface.ROTATION_270 -> 270
+            else -> 0
+        }
+        return if (mirrorFront) {
+            // Front camera: sensor is mirrored, so invert the orientation direction.
+            (sensorOrientation + rotation) % 360
+        } else {
+            (sensorOrientation - rotation + 360) % 360
+        }
     }
 
     private fun prepareRecorder(): Boolean {
@@ -391,7 +509,7 @@ class CameraController(
             recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
             recorder.setAudioEncodingBitRate(128_000)
             recorder.setAudioSamplingRate(44_100)
-            recorder.setOrientationHint(sensorOrientation)
+            recorder.setOrientationHint(jpegOrientation())
             recorder.prepare()
             mediaRecorder = recorder
             true
@@ -452,16 +570,27 @@ class CameraController(
 
     private fun chooseSize(sizes: List<Size>?, aspect: Aspect): Size? {
         if (sizes.isNullOrEmpty()) return null
-        // The sensor always outputs landscape buffers, so map 9:16 -> 16:9 for
-        // buffer selection (the texture rotation turns it into portrait display).
-        val effectiveW = if (aspect.w < aspect.h) aspect.h else aspect.w
-        val effectiveH = if (aspect.w < aspect.h) aspect.w else aspect.h
-        val targetRatio = effectiveW.toDouble() / effectiveH
+        val targetRatio = aspect.ratio
         val best = sizes.filter { s ->
             val ratio = s.width.toDouble() / s.height
             Math.abs(ratio - targetRatio) < 0.03
         }.maxByOrNull { it.width.toLong() * it.height.toLong() }
         return best ?: sizes.maxByOrNull { it.width.toLong() * it.height.toLong() }
+    }
+
+    /** Picks a preview size close to 1080p for the chosen aspect (performance). */
+    private fun choosePreviewSize(sizes: List<Size>?, aspect: Aspect): Size? {
+        if (sizes.isNullOrEmpty()) return null
+        val targetRatio = aspect.ratio
+        val matching = sizes.filter { s ->
+            val ratio = s.width.toDouble() / s.height
+            Math.abs(ratio - targetRatio) < 0.03
+        }
+        val pool = if (matching.isNotEmpty()) matching else sizes
+        // Prefer a size at or below ~1080p to keep the preview lightweight.
+        val capped = pool.filter { it.width <= 1920 && it.height <= 1088 }
+        return (if (capped.isNotEmpty()) capped else pool)
+            .maxByOrNull { it.width.toLong() * it.height.toLong() }
     }
 
     private fun rearCameraId(): String? {
