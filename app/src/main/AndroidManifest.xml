@@ -15,13 +15,18 @@
         android:theme="@style/Theme.Krush">
 
         <activity
-            android:name=".MainActivity"
+            android:name=".CameraActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/diagnostics_name" />
     </application>
 
 </manifest>

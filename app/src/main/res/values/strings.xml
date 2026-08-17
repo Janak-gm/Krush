@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Krush</string>
+    <string name="diagnostics_name">Krush Diagnostics</string>
 </resources>
