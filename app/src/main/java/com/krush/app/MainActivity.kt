@@ -88,6 +88,12 @@ class MainActivity : AppCompatActivity() {
                 if (labResult.jpegFile != null) sb.append("JPEG saved: ${labResult.jpegFile.name}\n")
                 if (labResult.yuvThumbFile != null) sb.append("YUV thumb: ${labResult.yuvThumbFile.name}\n")
                 if (labResult.jpegThumbFile != null) sb.append("JPEG thumb: ${labResult.jpegThumbFile.name}\n")
+
+                // ISP sweep
+                val sweepDir = File(outDir, "sweep")
+                if (!sweepDir.exists()) sweepDir.mkdirs()
+                sb.append("\n===== ISP SWEEP =====\n")
+                sb.append(IspSweep.run(this, sweepDir))
             } catch (e: Exception) {
                 sb.append("FATAL: ").append(e.message).append('\n')
             }
