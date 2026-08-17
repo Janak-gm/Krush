@@ -281,7 +281,8 @@ class CameraController(
 
             val isFront = characteristics?.get(CameraCharacteristics.LENS_FACING) ==
                 CameraCharacteristics.LENS_FACING_FRONT
-            textureView.setCameraParams(imgSize.width, imgSize.height, sensorOrientation, isFront)
+            val pSize = previewSize ?: Size(1920, 1080)
+            textureView.setCameraParams(pSize.width, pSize.height, sensorOrientation, isFront)
 
             cameraManager.openCamera(cameraId, object : CameraDevice.StateCallback() {
                 override fun onOpened(camera: CameraDevice) {

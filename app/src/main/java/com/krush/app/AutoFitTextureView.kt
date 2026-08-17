@@ -2,6 +2,7 @@ package com.krush.app
 
 import android.content.Context
 import android.graphics.Matrix
+import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.Surface
 import android.view.TextureView
@@ -22,51 +23,63 @@ class AutoFitTextureView @JvmOverloads constructor(
     private var mirror = false
 
     fun setAspectRatio(width: Int, height: Int) {
+        if (Thread.currentThread() == android.os.Looper.getMainLooper().thread) {
+            applyAspectRatio(width, height)
+        } else {
+            post { applyAspectRatio(width, height) }
+        }
+    }
+
+    private fun applyAspectRatio(width: Int, height: Int) {
         ratioWidth = width
         ratioHeight = height
         requestLayout()
     }
 
     /**
-     * Configure the view for the given camera buffer (always in sensor/landscape
-     * orientation) plus the sensor rotation. Applies the correct rotation matrix so
-     * the preview is never stretched, and picks the correct displayed aspect ratio.
+     * Configure the view for the given camera preview buffer (always in sensor/landscape
+     * orientation) plus the sensor rotation. The view aspect ratio is derived from the
+     * buffer rotated into display orientation so the preview is never stretched.
      */
     fun setCameraParams(bufferWidth: Int, bufferHeight: Int, sensorOrientationDegrees: Int, mirrorPreview: Boolean) {
+        if (Thread.currentThread() == android.os.Looper.getMainLooper().thread) {
+            applyCameraParams(bufferWidth, bufferHeight, sensorOrientationDegrees, mirrorPreview)
+        } else {
+            post { applyCameraParams(bufferWidth, bufferHeight, sensorOrientationDegrees, mirrorPreview) }
+        }
+    }
+
+    private fun applyCameraParams(bufferWidth: Int, bufferHeight: Int, sensorOrientationDegrees: Int, mirrorPreview: Boolean) {
         previewWidth = bufferWidth
         previewHeight = bufferHeight
         sensorOrientation = sensorOrientationDegrees
         mirror = mirrorPreview
 
-        val degrees = (sensorOrientationDegrees - displayDegrees() + 360) % 360
-        if (degrees == 90 || degrees == 270) {
-            setAspectRatio(bufferHeight, bufferWidth)
+        val rotation = displayRotation()
+        val swapped = (sensorOrientationDegrees + rotation) % 180 != 0
+        if (swapped) {
+            applyAspectRatio(bufferHeight, bufferWidth)
         } else {
-            setAspectRatio(bufferWidth, bufferHeight)
+            applyAspectRatio(bufferWidth, bufferHeight)
         }
+        configureTransform(width, height)
     }
 
-    private fun displayDegrees(): Int {
-        val rotation = when (val wm = context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager) {
-            null -> return 0
-            else -> wm.defaultDisplay.rotation
-        }
-        return when (rotation) {
-            Surface.ROTATION_90 -> 90
-            Surface.ROTATION_180 -> 180
-            Surface.ROTATION_270 -> 270
-            else -> 0
-        }
+    private fun displayRotation(): Int = when ((context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager)
+        ?.defaultDisplay?.rotation) {
+        Surface.ROTATION_90 -> 90
+        Surface.ROTATION_180 -> 180
+        Surface.ROTATION_270 -> 270
+        else -> 0
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
         val width = MeasureSpec.getSize(widthMeasureSpec)
         val height = MeasureSpec.getSize(heightMeasureSpec)
         if (ratioWidth == 0 || ratioHeight == 0) {
             setMeasuredDimension(width, height)
         } else {
-            if (width < height * ratioWidth / ratioHeight) {
+            if (width.toLong() * ratioHeight < height.toLong() * ratioWidth) {
                 setMeasuredDimension(width, width * ratioHeight / ratioWidth)
             } else {
                 setMeasuredDimension(height * ratioWidth / ratioHeight, height)
@@ -80,22 +93,30 @@ class AutoFitTextureView @JvmOverloads constructor(
     }
 
     private fun configureTransform(viewWidth: Int, viewHeight: Int) {
-        if (previewWidth == 0 || viewWidth == 0) return
+        if (previewWidth == 0 || previewHeight == 0 || viewWidth == 0 || viewHeight == 0) return
 
-        val degrees = (sensorOrientation - displayDegrees() + 360) % 360
+        val rotation = displayRotation()
         val matrix = Matrix()
-        val cx = viewWidth / 2f
-        val cy = viewHeight / 2f
+        val viewRect = RectF(0f, 0f, viewWidth.toFloat(), viewHeight.toFloat())
+        val bufferRect = RectF(0f, 0f, previewHeight.toFloat(), previewWidth.toFloat())
+        val centerX = viewRect.centerX()
+        val centerY = viewRect.centerY()
 
-        when (degrees) {
-            0 -> { /* no rotation */ }
-            90 -> matrix.postRotate(90f, cx, cy)
-            180 -> matrix.postRotate(180f, cx, cy)
-            270 -> matrix.postRotate(270f, cx, cy)
+        if (Surface.ROTATION_90 == rotation || Surface.ROTATION_270 == rotation) {
+            bufferRect.offset(centerX - bufferRect.centerX(), centerY - bufferRect.centerY())
+            matrix.setRectToRect(viewRect, bufferRect, Matrix.ScaleToFit.FILL)
+            val scale = Math.max(
+                viewHeight.toFloat() / previewHeight,
+                viewWidth.toFloat() / previewWidth
+            )
+            matrix.postScale(scale, scale, centerX, centerY)
+            matrix.postRotate(90f * (rotation - 2), centerX, centerY)
+        } else if (Surface.ROTATION_180 == rotation) {
+            matrix.postRotate(180f, centerX, centerY)
         }
 
         if (mirror) {
-            matrix.postScale(-1f, 1f, cx, cy)
+            matrix.postScale(-1f, 1f, centerX, centerY)
         }
 
         setTransform(matrix)
